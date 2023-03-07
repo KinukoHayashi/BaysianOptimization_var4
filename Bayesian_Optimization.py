@@ -1,3 +1,4 @@
+# 1変数用ベイズ最適化プログラム
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -5,24 +6,22 @@ import datetime
 import GPy
 import GPyOpt
 import csv
+from matplotlib import pyplot as plt
+
+# 得られたx,yを入力。x,yともにnumpyの2D arrayとなることに注意
 
 
-def main(particle_particle_Friction, particle_particle_rollingFriction, particle_wall_Friction, particle_wall_rollingFriction, L, k):
-    # 4つの摩擦係数を想定したプログラム
+def BayOpt(L, ε, k, test_num):
+    # 1つの摩擦係数を想定したプログラム
     # ライブラリー類のインポート
 
-    friction = [particle_particle_Friction, particle_particle_rollingFriction,
-                particle_wall_Friction, particle_wall_rollingFriction, L]
-
-    with open('zikken_data4.csv', 'a', newline="")as f:
-        writer = csv.writer(f)
-        writer.writerow(friction)
     # 既知の実験データを読み込み前処理(標準化)を実行
 
-    data = pd.read_csv("zikken_data4.csv", encoding="utf-8")
+    data = pd.read_csv("GB_zikken_data_"+str(test_num) +
+                       ".csv", encoding="utf-8")
     # 実験における変数の数を定義
-    num_x = len(data.columns)-1
-    print(num_x)
+    num_x = len(data.columns)-2
+    print("変数の数:"+str(num_x))
     # 各変数の刻み幅(step),最小値(min),最大値(max),標準化後の刻み幅(norm_step),標準化後の定義域(norm_range)を定義
     # 摩擦係数をかんがえるのでmax = 1，min = 0とした. 刻み幅は適当に0.01 としたので要検討
 
@@ -35,11 +34,10 @@ def main(particle_particle_Friction, particle_particle_rollingFriction, particle
              "_step)/((μ"+str(i)+"_max)-(μ"+str(i)+"_min)))")
         # print(norm_x"+str(i)+"_step)
         #exec("norm_μ"+str(i)+"_range = np.arange(0, (1+norm_μ"+str(i)+"_step), norm_μ"+str(i)+"_step)")
-    norm_μ0_range = np.arange(0, 1.01, 0.01)
-    norm_μ1_range = np.arange(0, 1.1, 0.1)
-    norm_μ2_range = np.arange(0, 1.01, 0.01)
-    norm_μ3_range = np.arange(0, 1.1, 0.1)
-
+    norm_μ0_range = np.arange(0, 1.005, 0.010101)
+    norm_μ1_range = np.arange(0, 1.001, 0.010101)
+    norm_μ2_range = np.arange(0, 1.005, 0.010101)
+    norm_μ3_range = np.arange(0, 1.001, 0.010101)
     # MinMaxScalerを用いて標準化処理を実行（標準化前：data→標準化後：norm_dataにデータ名を変更）
     # 読み込んだ既知の実験データに定義域外のデータ（最小値や最大値の範囲を超える設定値）がある場合はこの方法では上手くいかないので注意
     # 読み込んだデータの3行目（最小値）以下のxの値のみを標準化を実行
@@ -62,7 +60,8 @@ def main(particle_particle_Friction, particle_particle_rollingFriction, particle
     norm_data = pd.concat(
         [df_new_norm_data_wo_y_reset, df_data_y_reset], axis=1)
     norm_data.columns = data.columns
-    norm_data.to_csv("norm_zikken_data4.csv", index=False)
+    norm_data.to_csv("GB_norm_zikken_data"+str(test_num) +
+                     ".csv", index=False)
     # 正規化後のデータに対してベイズ最適化を実行（yの値をなるべく小さくする条件探索）
 
     # 開始時刻
@@ -72,33 +71,31 @@ def main(particle_particle_Friction, particle_particle_rollingFriction, particle
     np.random.seed(1234)
     # 定義域（条件の探索範囲）の設定
     # typeは‘continuous’:連続変数，‘discrete’：離散変数，‘categorical’：カテゴリで指定
-    bounds = [{'name': 'particle_particle_Friction', 'type': 'discrete', 'domain': norm_μ0_range},
-              {'name': 'particle_particle_rollingFriction',
-                  'type': 'discrete', 'domain': norm_μ1_range},
-              {'name': 'particle_wall_Friction',
-                  'type': 'discrete', 'domain': norm_μ2_range},
-              {'name': 'particle_wall_rollingFriction', 'type': 'discrete', 'domain': norm_μ3_range}]
-
+    bounds = [{'name': 'particle_wall_Friction',
+               'type': 'discrete', 'domain': norm_μ0_range}, {'name': 'particle_wall_Friction', 'type': 'discrete', 'domain': norm_μ1_range}, {'name': 'particle_wall_Friction', 'type': 'discrete', 'domain': norm_μ2_range}, {'name': 'particle_wall_Friction', 'type': 'discrete', 'domain': norm_μ3_range}]
+    #
     # 既知データをインプットしていく
     # データ入力用の箱を作っておく
     X_step = []
     Y_step = []
     # 標準化済みのcsvデータ（既知の実験データ）を読み込む
-    norm_data = pd.read_csv("norm_zikken_data4.csv", encoding="utf-8")
+    norm_data = pd.read_csv("GB_norm_zikken_data"+str(test_num) +
+                            ".csv", encoding="utf-8")
     norm_data_x = norm_data.iloc[:, 0:num_x]  # 全行のxを読み込む
     norm_data_y = norm_data.iloc[:, num_x:num_x+1]  # 全行のyを読み込む
     # xとyをリスト化する
     X_step = np.asarray(norm_data_x)
     Y_step = np.asarray(norm_data_y)
-    # グラフ描写用のリストを作っておく
+    """グラフ描写用のリストを作っておく
     i_list = []
     y_pre_list = []
     y_exp_list = []
     y_var_list = []
+    """
     nextμ = []
     # 以下のパラメータでベイズ最適化を実行する
     params = {'acquisition_type': 'LCB',  # 獲得関数としてLower Confidence Boundを指定
-              'acquisition_weight': 10/k+1,  # LCBのパラメータを設定．デフォルトは2
+              'acquisition_weight': 2,  # LCBのパラメータを設定．デフォルトは2
               # GPに使うカーネルの設定 #boundsの次元でinputの次元を定義
               'kernel': GPy.kern.Matern52(input_dim=len(bounds), ARD=True),
               'f': None,  # 最適化する関数の設定（実験結果は分からないので設定しない）．
@@ -112,6 +109,7 @@ def main(particle_particle_Friction, particle_particle_rollingFriction, particle
               }
     # ベイズ最適化のモデルの作成
     bo_step = GPyOpt.methods.BayesianOptimization(**params)
+
     # 次の候補点のx,y(予測値,分散)の計算
     x_suggest = bo_step.suggest_next_locations(ignored_X=X_step)
     y_predict = bo_step.model.model.predict(
@@ -129,17 +127,19 @@ def main(particle_particle_Friction, particle_particle_rollingFriction, particle
     print("次の実験点のparticle_particle_rollingFrictionは " + str(nextμ[1]) + "です")
     print("次の実験点のparticle_wall_Frictionは " + str(nextμ[2]) + "です")
     print("次の実験点のparticle_wall_rollingFrictionは " + str(nextμ[3]) + "です")
-
     # y_meanとy_varianceはndarrayなのでfloatに変換
     print("次の実験点でのmeanは " + "{:.4f}".format(float(y_mean)) + "です")
     print("次の実験点でのstdは " + "{:.4f}".format(float(y_variance)) + "です")
+    print("次の実験点での獲得関数は " +
+          "{:.4f}".format(float(-y_mean + 2*y_variance)) + "です")
     end_time = datetime.datetime.today()
     print("終了時刻: " + end_time.strftime('%Y-%m-%d_%H-%M-%S'))
     print("所要時間: " + str(end_time - start_time))
+
     bo_step.plot_acquisition()
-    return nextμ
+
+    return nextμ, k
 
 
-if __name__ == '__main__':
-    main(0.1, 0.1, 0.1, 0.1, 3, 4)
-    printaaa
+# if __name__ == '__main__':
+    #a = BayOpt(1, 0.1, 0.1505209440552428)
